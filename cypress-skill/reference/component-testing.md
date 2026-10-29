@@ -1,9 +1,11 @@
 # Cypress — Component Testing
 
+The `mount` functions for React and Vue ship inside the `cypress` package (`cypress/react`, `cypress/vue`). Don't install `@cypress/react` or `@cypress/vue`; those standalone packages exist only for projects stuck on old framework versions.
+
 ## React Setup
 
 ```bash
-npm install cypress @cypress/react --save-dev
+npm install cypress --save-dev
 ```
 
 ```javascript
@@ -20,21 +22,29 @@ module.exports = defineConfig({
 });
 ```
 
+Register `cy.mount` once in the component support file so every spec can use it:
+
+```javascript
+// cypress/support/component.js
+import { mount } from 'cypress/react';
+
+Cypress.Commands.add('mount', mount);
+```
+
 ## React Component Test
 
 ```javascript
-import { mount } from '@cypress/react';
 import Button from './Button';
 
 describe('Button', () => {
   it('renders with text', () => {
-    mount(<Button label="Click Me" />);
+    cy.mount(<Button label="Click Me" />);
     cy.get('button').should('contain', 'Click Me');
   });
 
   it('calls onClick handler', () => {
     const onClick = cy.stub().as('click');
-    mount(<Button label="Click" onClick={onClick} />);
+    cy.mount(<Button label="Click" onClick={onClick} />);
     cy.get('button').click();
     cy.get('@click').should('have.been.calledOnce');
   });
@@ -44,12 +54,18 @@ describe('Button', () => {
 ## Vue Component Test
 
 ```javascript
-import { mount } from '@cypress/vue';
+// cypress/support/component.js
+import { mount } from 'cypress/vue';
+
+Cypress.Commands.add('mount', mount);
+```
+
+```javascript
 import Counter from './Counter.vue';
 
 describe('Counter', () => {
   it('increments count', () => {
-    mount(Counter);
+    cy.mount(Counter);
     cy.get('[data-cy="count"]').should('contain', '0');
     cy.get('[data-cy="increment"]').click();
     cy.get('[data-cy="count"]').should('contain', '1');

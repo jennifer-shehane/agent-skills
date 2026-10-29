@@ -19,9 +19,6 @@ export default defineConfig({
     defaultCommandTimeout: 10000,
     requestTimeout: 15000,
     responseTimeout: 30000,
-    env: {
-      apiUrl: 'http://localhost:3001/api',
-    },
     setupNodeEvents(on, config) {
       on('before:browser:launch', (browser, launchOptions) => {
         if (browser.name === 'chrome' && browser.isHeadless) {
@@ -29,11 +26,19 @@ export default defineConfig({
         }
         return launchOptions;
       });
-      // Load environment config
-      const envName = config.env.envName || 'staging';
+      // Load environment config. Merge `expose` key by key so values set
+      // elsewhere (CLI, other plugins) aren't wiped out.
+      const envName = config.expose.envName || 'staging';
       const envConfig = require(`./cypress/config/${envName}.json`);
-      return { ...config, ...envConfig };
+      config.baseUrl = envConfig.baseUrl;
+      config.expose = { ...config.expose, ...envConfig.expose };
+      return config;
     },
+  },
+  // Public, non-secret values: read in specs with Cypress.expose('apiUrl').
+  // Secrets (tokens, passwords) go in `env` and are read with cy.env().
+  expose: {
+    apiUrl: 'http://localhost:3001/api',
   },
   component: {
     devServer: { framework: 'react', bundler: 'vite' },
@@ -45,14 +50,14 @@ export default defineConfig({
 // cypress/config/staging.json
 {
   "baseUrl": "https://staging.example.com",
-  "env": { "apiUrl": "https://staging-api.example.com" }
+  "expose": { "apiUrl": "https://staging-api.example.com" }
 }
 // cypress/config/production.json
 {
   "baseUrl": "https://www.example.com",
-  "env": { "apiUrl": "https://api.example.com" }
+  "expose": { "apiUrl": "https://api.example.com" }
 }
-// Run: npx cypress run --env envName=production
+// Run: npx cypress run --expose envName=production
 ```
 
 ## §2 — Auth with cy.session()
@@ -263,6 +268,12 @@ beforeEach(() => {
 setupNodeEvents(on) {
   on('task', {
     async resetDB() {
+      // `migrate reset --force` drops every table in DATABASE_URL. Refuse to
+      // run unless it points at a database whose name marks it as a test DB.
+      const dbName = new URL(process.env.DATABASE_URL).pathname;
+      if (!/test/i.test(dbName)) {
+        throw new Error(`Refusing to reset non-test database: ${dbName}`);
+      }
       const { execSync } = require('child_process');
       execSync('npx prisma migrate reset --force');
       return null;
@@ -327,6 +338,8 @@ cy.get('my-web-component')
 ```typescript
 // Install: npm install -D cypress-axe axe-core
 // cypress/support/e2e.ts: import 'cypress-axe';
+// cypress.config.ts, inside setupNodeEvents (used by the last test below):
+//   on('task', { log(message) { console.log(message); return null; } });
 
 describe('Accessibility', () => {
   beforeEach(() => {
@@ -347,10 +360,11 @@ describe('Accessibility', () => {
   });
 
   it('logs violations without failing', () => {
+    // The 4th argument (skipFailures) keeps violations from failing the test
     cy.checkA11y(null, null, (violations) => {
       cy.task('log', `${violations.length} accessibility violation(s)`);
       violations.forEach(v => cy.task('log', `  - ${v.id}: ${v.description}`));
-    });
+    }, true);
   });
 });
 ```
@@ -360,13 +374,22 @@ describe('Accessibility', () => {
 ```typescript
 // With Percy: npm install -D @percy/cypress
 // cypress/support/e2e.ts: import '@percy/cypress';
+// Put PERCY_* options under `expose` in the config, not `env`.
 
 it('homepage visual snapshot', () => {
   cy.visit('/');
   cy.percySnapshot('Homepage');
 });
 
-// With cypress-image-snapshot
+// With @simonsmith/cypress-image-snapshot (the maintained fork; the original
+// cypress-image-snapshot package is abandoned)
+// npm install -D @simonsmith/cypress-image-snapshot
+// cypress/support/e2e.ts:
+//   import { addMatchImageSnapshotCommand } from '@simonsmith/cypress-image-snapshot/command';
+//   addMatchImageSnapshotCommand();
+// cypress.config.ts, inside setupNodeEvents:
+//   const { addMatchImageSnapshotPlugin } = require('@simonsmith/cypress-image-snapshot/plugin');
+//   addMatchImageSnapshotPlugin(on);
 it('component visual test', () => {
   cy.visit('/components');
   cy.getByTestId('product-card').first().matchImageSnapshot('product-card', {
@@ -390,13 +413,15 @@ jobs:
         browser: [chrome, firefox, edge]
     steps:
       - uses: actions/checkout@v4
-      - uses: cypress-io/github-action@v6
+      - uses: cypress-io/github-action@v7
         with:
           browser: ${{ matrix.browser }}
           start: npm start
           wait-on: 'http://localhost:3000'
           wait-on-timeout: 60
           record: true
+          # One group per browser so the three recorded runs stay separate in Cypress Cloud
+          group: ${{ matrix.browser }}
         env:
           CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
       - uses: actions/upload-artifact@v4
@@ -415,8 +440,10 @@ jobs:
         containers: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
-      - uses: cypress-io/github-action@v6
+      - uses: cypress-io/github-action@v7
         with:
+          start: npm start
+          wait-on: 'http://localhost:3000'
           record: true
           parallel: true
           group: 'CI Parallel'
@@ -432,10 +459,10 @@ jobs:
 | Detached from DOM | Element re-rendered mid-chain | Break chain, re-query after action |
 | Cross-origin error | Visiting different superdomain | Use `cy.origin()` for cross-origin |
 | `cy.intercept` not matching | Wrong URL pattern or method | Use DevTools Network tab to verify exact URL |
-| File upload fails | Hidden input, custom upload widget | Use `selectFile({ action: 'drag-drop' })` or `force: true` |
+| File upload fails | Hidden input, custom upload widget | Use `selectFile({ action: 'drag-drop' })` on the drop zone; `force: true` only for an input the app hides on purpose |
 | Flaky `cy.wait(ms)` | Hardcoded wait | Replace with `cy.wait('@alias')` or assertion |
 | Session not restored | Validate fn failing | Check `cy.session` validate callback |
-| `cy.click()` on hidden element | Element covered or `display:none` | Use `{ force: true }` or scroll into view |
+| `cy.click()` on hidden element | Element covered or `display:none` | Do what a user would: close the overlay, open the menu, or wait for the element to appear. `{ force: true }` skips actionability checks and can hide a real bug |
 | Tests interfere with each other | Shared state/cookies | Use `cy.session()` and `beforeEach` reset |
 | Component test mount fails | Missing providers | Wrap in context providers during `cy.mount` |
 | Iframe not accessible | Cypress doesn't natively enter iframes | Use `.its('0.contentDocument.body')` pattern |
@@ -446,9 +473,9 @@ jobs:
 - ✅ Login via API for non-login tests: `cy.request()` + `cy.session()`
 - ✅ Use `data-testid` for selectors, avoid brittle CSS paths
 - ✅ Use `cy.intercept()` to mock external APIs
-- ✅ Use `retries: { runMode: 2 }` in CI for resilience
+- ✅ Use `retries: { runMode: 2 }` in CI, and track which tests only pass on retry; retries hide flakiness, they don't fix it
 - ✅ Use `cy.session()` for auth caching across tests
-- ✅ Use fixtures for test data, never hardcode
+- ✅ Keep shared or bulky test data in fixtures; short inline values are fine when they make the test easier to read
 - ✅ Use `cy.clock()`/`cy.tick()` for time-dependent tests
 - ✅ Avoid testing third-party sites/services
 - ✅ Keep tests independent — no shared state

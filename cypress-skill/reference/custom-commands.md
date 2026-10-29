@@ -42,6 +42,7 @@ Cypress.Commands.add('getByDataCy', (selector) => {
   cy.get(`[data-cy="${selector}"]`);
 });
 
+// Requires cypress-axe; call after cy.visit() so axe is injected into the loaded page
 Cypress.Commands.add('shouldBeAccessible', () => {
   cy.injectAxe();
   cy.checkA11y();
