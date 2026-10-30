@@ -371,25 +371,66 @@ describe('Accessibility', () => {
 
 ## §12 — Visual Regression (with Percy or cypress-image-snapshot)
 
-```typescript
-// With Percy: npm install -D @percy/cypress
-// cypress/support/e2e.ts: import '@percy/cypress';
-// Put PERCY_* options under `expose` in the config, not `env`.
+### Percy
 
+```bash
+npm install -D @percy/cypress
+```
+
+```typescript
+// cypress/support/e2e.ts
+import '@percy/cypress';
+// Put PERCY_* options under `expose` in the config, not `env`.
+```
+
+```typescript
+// cypress/e2e/visual.cy.ts
 it('homepage visual snapshot', () => {
   cy.visit('/');
   cy.percySnapshot('Homepage');
 });
+```
 
-// With @simonsmith/cypress-image-snapshot (the maintained fork; the original
-// cypress-image-snapshot package is abandoned)
-// npm install -D @simonsmith/cypress-image-snapshot
-// cypress/support/e2e.ts:
-//   import { addMatchImageSnapshotCommand } from '@simonsmith/cypress-image-snapshot/command';
-//   addMatchImageSnapshotCommand();
-// cypress.config.ts, inside setupNodeEvents:
-//   const { addMatchImageSnapshotPlugin } = require('@simonsmith/cypress-image-snapshot/plugin');
-//   addMatchImageSnapshotPlugin(on);
+### @simonsmith/cypress-image-snapshot
+
+Use `@simonsmith/cypress-image-snapshot`, the maintained fork. The original `cypress-image-snapshot` package is abandoned.
+
+```bash
+npm install -D @simonsmith/cypress-image-snapshot
+```
+
+```typescript
+// cypress.config.ts
+import { defineConfig } from 'cypress';
+import { addMatchImageSnapshotPlugin } from '@simonsmith/cypress-image-snapshot/plugin';
+
+export default defineConfig({
+  e2e: {
+    setupNodeEvents(on) {
+      addMatchImageSnapshotPlugin(on);
+    },
+  },
+});
+```
+
+```typescript
+// cypress/support/e2e.ts
+import { addMatchImageSnapshotCommand } from '@simonsmith/cypress-image-snapshot/command';
+
+addMatchImageSnapshotCommand();
+```
+
+```json
+// tsconfig.json — types cy.matchImageSnapshot() in specs; needed when the tsconfig doesn't include the support file
+{
+  "compilerOptions": {
+    "types": ["cypress", "@simonsmith/cypress-image-snapshot/types"]
+  }
+}
+```
+
+```typescript
+// cypress/e2e/visual.cy.ts
 it('component visual test', () => {
   cy.visit('/components');
   cy.getByTestId('product-card').first().matchImageSnapshot('product-card', {
@@ -398,6 +439,8 @@ it('component visual test', () => {
   });
 });
 ```
+
+The first run saves a baseline image to `cypress/snapshots/`. Commit it; later runs fail when the element differs from it by more than the threshold.
 
 ## §13 — CI/CD Integration
 
