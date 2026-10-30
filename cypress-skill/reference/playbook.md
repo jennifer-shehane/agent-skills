@@ -269,9 +269,11 @@ setupNodeEvents(on) {
   on('task', {
     async resetDB() {
       // `migrate reset --force` drops every table in DATABASE_URL. Refuse to
-      // run unless it points at a database whose name marks it as a test DB.
-      const dbName = new URL(process.env.DATABASE_URL).pathname;
-      if (!/test/i.test(dbName)) {
+      // run unless the database name has "test" as a whole word (app_test, test-db).
+      const { DATABASE_URL } = process.env;
+      if (!DATABASE_URL) throw new Error('DATABASE_URL is not set');
+      const dbName = new URL(DATABASE_URL).pathname.slice(1);
+      if (!/(^|[_-])test([_-]|$)/i.test(dbName)) {
         throw new Error(`Refusing to reset non-test database: ${dbName}`);
       }
       const { execSync } = require('child_process');
@@ -463,7 +465,7 @@ jobs:
           wait-on: 'http://localhost:3000'
           wait-on-timeout: 60
           record: true
-          # One group per browser so the three recorded runs stay separate in Cypress Cloud
+          # The matrix jobs record into one Cypress Cloud run; a group per browser keeps their results apart
           group: ${{ matrix.browser }}
         env:
           CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
